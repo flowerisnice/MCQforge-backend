@@ -1,0 +1,14 @@
+{
+  "duplicateStrategy": "overwrite",
+  "questions": [
+    {
+      "question": "Which of the following is the basic unit of life?",
+      "options": ["Tissue", "Cell", "Organ", "Organism"],
+      "correctAnswer": "Cell",
+      "sourceText": "UPDATED PROOF: The cell is the fundamental structural and functional unit of life.",
+      "chapter": "Cell: The Unit of Life",
+      "class": 11,
+      "tags": ["updated", "important"]
+    }
+  ]
+}

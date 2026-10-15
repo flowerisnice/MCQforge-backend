@@ -1,0 +1,52 @@
+[
+  {
+    "question": "Which of the following is the basic unit of life?",
+    "options": ["Tissue", "Cell", "Organ", "Organism"],
+    "correctAnswer": "Cell",
+    "sourceText": "The cell is the basic structural and functional unit of all living organisms.",
+    "chapter": "Cell: The Unit of Life",
+    "class": 11,
+    "tags": ["important", "easy"],
+    "explanation": "The cell theory proposed by Schleiden and Schwann established the cell as the fundamental unit of life."
+  },
+  {
+    "question": "Which organelle is known as the powerhouse of the cell?",
+    "options": ["Ribosome", "Mitochondria", "Golgi apparatus", "Lysosome"],
+    "correctAnswer": "Mitochondria",
+    "sourceText": "Mitochondria are the sites of aerobic respiration and produce cellular energy in the form of ATP, hence called the powerhouse of the cell.",
+    "chapter": "Cell: The Unit of Life",
+    "class": 11,
+    "tags": ["important", "pyq"],
+    "explanation": "Mitochondria generate ATP through oxidative phosphorylation."
+  },
+  {
+    "question": "In which phase of mitosis do chromosomes align at the equatorial plate?",
+    "options": ["Prophase", "Metaphase", "Anaphase", "Telophase"],
+    "correctAnswer": "Metaphase",
+    "sourceText": "During metaphase, the chromosomes align along the equatorial plate of the cell.",
+    "chapter": "Cell Cycle and Cell Division",
+    "class": 11,
+    "tags": ["hard", "diagram-based"],
+    "explanation": "Metaphase alignment is a key checkpoint in mitosis."
+  },
+  {
+    "question": "Which hormone is responsible for the fight-or-flight response?",
+    "options": ["Insulin", "Adrenaline", "Thyroxine", "Estrogen"],
+    "correctAnswer": "Adrenaline",
+    "sourceText": "Adrenaline is rapidly secreted in response to stress and is responsible for the fight-or-flight response.",
+    "chapter": "Chemical Coordination and Integration",
+    "class": 11,
+    "tags": ["important", "easy"],
+    "explanation": "Adrenaline is secreted by the adrenal medulla."
+  },
+  {
+    "question": "Which of the following is a method of asexual reproduction in plants?",
+    "options": ["Pollination", "Fertilization", "Vegetative propagation", "Meiosis"],
+    "correctAnswer": "Vegetative propagation",
+    "sourceText": "Vegetative propagation is an asexual method of reproduction in plants where new plants arise from vegetative parts.",
+    "chapter": "Sexual Reproduction in Flowering Plants",
+    "class": 12,
+    "tags": ["easy"],
+    "explanation": "Vegetative propagation bypasses seed formation entirely."
+  }
+]
