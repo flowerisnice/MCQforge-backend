@@ -36,6 +36,9 @@ export interface QueryQuestionsFilter {
   previouslyWrong?: boolean;
   unattempted?: boolean;
   maxAttempts?: number;
+  since?: string;
+  ids?: string[];
+  excludeIds?: string[];
   limit?: number;
   offset?: number;
   randomize?: boolean;
@@ -44,8 +47,51 @@ export interface QueryQuestionsFilter {
 @Injectable()
 export class QuestionsService {
   private readonly logger = new Logger(QuestionsService.name);
+  private cachedQuestions: StoredQuestion[] | null = null;
+  private lastCacheTime = 0;
+  private readonly CACHE_TTL_MS = 60 * 1000; // 60s memory cache to eliminate full DB scans
 
   constructor(private readonly firebaseService: FirebaseAdminService) {}
+
+  public invalidateCache(): void {
+    this.cachedQuestions = null;
+    this.lastCacheTime = 0;
+  }
+
+  private async loadAllQuestions(): Promise<StoredQuestion[]> {
+    const now = Date.now();
+    if (this.cachedQuestions && now - this.lastCacheTime < this.CACHE_TTL_MS) {
+      return this.cachedQuestions;
+    }
+
+    const db = this.firebaseService.getFirestore();
+    const [qSnap, stateSnap] = await Promise.all([
+      db.collection('questions').get(),
+      db.collection('questionState').get().catch(() => ({ docs: [] } as any)),
+    ]);
+
+    const stateMap = new Map<string, any>();
+    stateSnap.docs.forEach((doc: any) => {
+      stateMap.set(doc.id, doc.data());
+    });
+
+    const list: StoredQuestion[] = [];
+    qSnap.docs.forEach(doc => {
+      const data = doc.data() as StoredQuestion;
+      const state = stateMap.get(doc.id);
+      list.push({
+        ...data,
+        bookmarked: state ? !!state.bookmarked : data.tags?.includes('bookmarked') || false,
+        previouslyWrong: state ? !!state.previouslyWrong : data.tags?.includes('previously_wrong') || false,
+        timesAttempted: state?.timesAttempted || 0,
+        timesWrong: state?.timesWrong || 0,
+      });
+    });
+
+    this.cachedQuestions = list;
+    this.lastCacheTime = now;
+    return list;
+  }
 
   /**
    * Validates and batch-writes an array of questions to Firestore.
@@ -182,35 +228,49 @@ export class QuestionsService {
 
     summary.chaptersDetected = Array.from(chaptersSet);
 
-    // 3. Batch commit to Firestore in chunks of up to 400 (under 500 limit)
-    const BATCH_SIZE = 400;
-    for (let b = 0; b < writes.length; b += BATCH_SIZE) {
-      const slice = writes.slice(b, b + BATCH_SIZE);
-      const batch = db.batch();
+    // 3. Batch commit to Firestore safely (Firestore limits to max 500 writes per batch).
+    // Inserts do 2 operations (question + questionState), updates do 1 operation.
+    // We cap each batch at 400 operations to stay comfortably under 500.
+    const MAX_OPERATIONS_PER_BATCH = 400;
+    let currentBatch = db.batch();
+    let currentOpCount = 0;
 
-      for (const item of slice) {
-        const questionRef = db.collection('questions').doc(item.id);
-        batch.set(questionRef, item.questionData);
-
-        // Also initialize questionState for new questions
-        if (!item.isUpdate) {
-          const stateRef = db.collection('questionState').doc(item.id);
-          batch.set(stateRef, {
-            qid: item.id,
-            timesAttempted: 0,
-            timesCorrect: 0,
-            timesWrong: 0,
-            lastAttemptedAt: null,
-            bookmarked: false,
-            previouslyWrong: false,
-            srsLevel: 0,
-            srsDueDate: null,
-          });
-        }
+    for (const item of writes) {
+      const opsForItem = item.isUpdate ? 1 : 2;
+      if (currentOpCount + opsForItem > MAX_OPERATIONS_PER_BATCH) {
+        await currentBatch.commit();
+        currentBatch = db.batch();
+        currentOpCount = 0;
       }
 
-      await batch.commit();
+      const questionRef = db.collection('questions').doc(item.id);
+      currentBatch.set(questionRef, item.questionData);
+      currentOpCount++;
+
+      // Also initialize questionState for new questions
+      if (!item.isUpdate) {
+        const stateRef = db.collection('questionState').doc(item.id);
+        currentBatch.set(stateRef, {
+          qid: item.id,
+          timesAttempted: 0,
+          timesCorrect: 0,
+          timesWrong: 0,
+          lastAttemptedAt: null,
+          bookmarked: false,
+          previouslyWrong: false,
+          srsLevel: 0,
+          srsDueDate: null,
+        });
+        currentOpCount++;
+      }
     }
+
+    if (currentOpCount > 0) {
+      await currentBatch.commit();
+    }
+
+    // Invalidate local in-memory cache so subsequent reads get the newly inserted questions
+    this.invalidateCache();
 
     // 4. Update aggregate meta counters
     try {
@@ -286,6 +346,7 @@ export class QuestionsService {
     };
 
     await docRef.set(updated, { merge: true });
+    this.invalidateCache();
     return updated;
   }
 
@@ -330,37 +391,93 @@ export class QuestionsService {
     batch.update(qRef, { tags: updatedTags });
     await batch.commit();
 
+    this.invalidateCache();
     return { id, bookmarked: newBookmarked };
   }
 
   /**
-   * Retrieves questions with flexible filtering by class, chapters, tags, search query, and states.
+   * Lightweight manifest of all questions in bank.
+   * Allows clients to detect missing questions and avoid unnecessary requests.
+   */
+  async getManifest(): Promise<{
+    total: number;
+    lastUpdated: string;
+    items: Array<{ id: string; hash: string; updatedAt: string }>;
+  }> {
+    const all = await this.loadAllQuestions();
+    let maxUpdated = '';
+    const items = all.map(q => {
+      const u = q.updatedAt || q.createdAt || '';
+      if (u > maxUpdated) maxUpdated = u;
+      return { id: q.id, hash: q.hash, updatedAt: u };
+    });
+    return {
+      total: items.length,
+      lastUpdated: maxUpdated || new Date().toISOString(),
+      items,
+    };
+  }
+
+  /**
+   * Returns only questions whose IDs are NOT in the client's knownIds list (local storage).
+   * Paged in chunks so that the client only downloads missing delta without unnecessary requests.
+   */
+  async getMissingQuestions(
+    knownIds: string[] = [],
+    limit: number = 100,
+    offset: number = 0,
+  ): Promise<{ totalMissing: number; hasMore: boolean; questions: StoredQuestion[] }> {
+    const all = await this.loadAllQuestions();
+    const knownSet = new Set(knownIds);
+    const missing = all.filter(q => !knownSet.has(q.id));
+    const totalMissing = missing.length;
+    const paged = missing.slice(offset, offset + limit);
+    return {
+      totalMissing,
+      hasMore: offset + limit < totalMissing,
+      questions: paged,
+    };
+  }
+
+  /**
+   * Retrieves specific questions by list of IDs.
+   */
+  async getByIds(ids: string[]): Promise<StoredQuestion[]> {
+    if (!ids || ids.length === 0) return [];
+    const all = await this.loadAllQuestions();
+    const idSet = new Set(ids);
+    return all.filter(q => idSet.has(q.id));
+  }
+
+  /**
+   * Retrieves questions with flexible filtering by class, chapters, tags, search query, states, and incremental since.
    */
   async getQuestions(filter: QueryQuestionsFilter = {}): Promise<{ total: number; questions: StoredQuestion[] }> {
-    const db = this.firebaseService.getFirestore();
+    const all = await this.loadAllQuestions();
+    let list = [...all];
 
-    const [qSnap, stateSnap] = await Promise.all([
-      db.collection('questions').get(),
-      db.collection('questionState').get().catch(() => ({ docs: [] } as any)),
-    ]);
+    // 0. Since filter (incremental delta sync)
+    if (filter.since) {
+      const sinceDate = new Date(filter.since).getTime();
+      if (!isNaN(sinceDate)) {
+        list = list.filter(q => {
+          const updated = new Date(q.updatedAt || q.createdAt).getTime();
+          return updated > sinceDate;
+        });
+      }
+    }
 
-    const stateMap = new Map<string, any>();
-    stateSnap.docs.forEach((doc: any) => {
-      stateMap.set(doc.id, doc.data());
-    });
+    // 0b. IDs filter (only fetch specific requested IDs)
+    if (filter.ids && filter.ids.length > 0) {
+      const idSet = new Set(filter.ids);
+      list = list.filter(q => idSet.has(q.id));
+    }
 
-    let list: StoredQuestion[] = [];
-    qSnap.docs.forEach(doc => {
-      const data = doc.data() as StoredQuestion;
-      const state = stateMap.get(doc.id);
-      list.push({
-        ...data,
-        bookmarked: state ? !!state.bookmarked : data.tags?.includes('bookmarked') || false,
-        previouslyWrong: state ? !!state.previouslyWrong : data.tags?.includes('previously_wrong') || false,
-        timesAttempted: state?.timesAttempted || 0,
-        timesWrong: state?.timesWrong || 0,
-      });
-    });
+    // 0c. Exclude IDs filter (don't fetch questions already in local storage)
+    if (filter.excludeIds && filter.excludeIds.length > 0) {
+      const excludeSet = new Set(filter.excludeIds);
+      list = list.filter(q => !excludeSet.has(q.id));
+    }
 
     // 1. Class filter
     if (filter.class) {
@@ -412,7 +529,7 @@ export class QuestionsService {
       list = list.filter(q => !!q.previouslyWrong === filter.previouslyWrong);
     }
 
-    // 6. Free text search
+    // 8. Free text search
     if (filter.search && filter.search.trim()) {
       const query = filter.search.trim().toLowerCase();
       list = list.filter(
@@ -425,20 +542,24 @@ export class QuestionsService {
       );
     }
 
-    // 7. Randomization
+    // 9. Randomization
     if (filter.randomize) {
       list = list.sort(() => Math.random() - 0.5);
     }
 
     const total = list.length;
     const offset = filter.offset || 0;
-    const limit = filter.limit || 50;
+    const limit = filter.limit !== undefined ? filter.limit : 50;
 
-    const paged = list.slice(offset, offset + limit);
+    const paged = limit > 0 ? list.slice(offset, offset + limit) : list.slice(offset);
     return { total, questions: paged };
   }
 
   async getById(id: string): Promise<StoredQuestion | null> {
+    const all = await this.loadAllQuestions();
+    const found = all.find(q => q.id === id);
+    if (found) return found;
+
     const db = this.firebaseService.getFirestore();
     const doc = await db.collection('questions').doc(id).get();
     if (!doc.exists) return null;
@@ -461,6 +582,7 @@ export class QuestionsService {
     batch.delete(db.collection('questions').doc(id));
     batch.delete(db.collection('questionState').doc(id));
     await batch.commit();
+    this.invalidateCache();
     return true;
   }
 }

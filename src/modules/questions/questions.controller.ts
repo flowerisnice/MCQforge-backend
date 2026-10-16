@@ -113,8 +113,35 @@ export class QuestionsController {
     return this.questionsService.toggleBookmark(id);
   }
 
+  @Get('manifest')
+  @ApiOperation({ summary: 'Lightweight sync manifest of all question IDs, hashes, and update timestamps' })
+  async getManifest() {
+    return this.questionsService.getManifest();
+  }
+
+  @Post('missing')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get only questions that are missing in the client local storage (excludes knownIds)' })
+  async getMissingQuestions(
+    @Body() body: { knownIds?: string[] },
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const lim = limit ? parseInt(limit, 10) : 100;
+    const off = offset ? parseInt(offset, 10) : 0;
+    return this.questionsService.getMissingQuestions(body?.knownIds || [], lim, off);
+  }
+
+  @Post('by-ids')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Retrieve specific questions by an array of IDs' })
+  async getByIds(@Body() body: { ids?: string[] }) {
+    const questions = await this.questionsService.getByIds(body?.ids || []);
+    return { total: questions.length, questions };
+  }
+
   @Get()
-  @ApiOperation({ summary: 'Filter and retrieve questions by class, chapter, tag, search, or state' })
+  @ApiOperation({ summary: 'Filter and retrieve questions by class, chapter, tag, search, state, or incremental since' })
   @ApiQuery({ name: 'class', required: false, enum: [11, 12] })
   @ApiQuery({ name: 'chapter', required: false, type: String })
   @ApiQuery({ name: 'chapters', required: false, type: String, description: 'Comma-separated chapter names' })
@@ -124,6 +151,8 @@ export class QuestionsController {
   @ApiQuery({ name: 'previouslyWrong', required: false, type: Boolean })
   @ApiQuery({ name: 'unattempted', required: false, type: Boolean, description: 'Questions not asked even once' })
   @ApiQuery({ name: 'maxAttempts', required: false, type: Number, description: 'Filter questions asked less than N times' })
+  @ApiQuery({ name: 'since', required: false, type: String, description: 'ISO date string to only fetch delta modified since' })
+  @ApiQuery({ name: 'excludeIds', required: false, type: String, description: 'Comma-separated IDs to exclude' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   @ApiQuery({ name: 'randomize', required: false, type: Boolean })
@@ -137,11 +166,14 @@ export class QuestionsController {
     @Query('previouslyWrong') previouslyWrong?: string,
     @Query('unattempted') unattempted?: string,
     @Query('maxAttempts') maxAttempts?: string,
+    @Query('since') since?: string,
+    @Query('excludeIds') excludeIds?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('randomize') randomize?: string,
   ): Promise<{ total: number; questions: StoredQuestion[] }> {
     const chaptersArray = chapters ? chapters.split(',').map(c => c.trim()).filter(Boolean) : undefined;
+    const excludeIdsArray = excludeIds ? excludeIds.split(',').map(id => id.trim()).filter(Boolean) : undefined;
 
     return this.questionsService.getQuestions({
       class: classFilter ? (parseInt(classFilter, 10) as 11 | 12) : undefined,
@@ -153,7 +185,9 @@ export class QuestionsController {
       previouslyWrong: previouslyWrong !== undefined ? previouslyWrong === 'true' : undefined,
       unattempted: unattempted !== undefined ? unattempted === 'true' : undefined,
       maxAttempts: maxAttempts !== undefined ? parseInt(maxAttempts, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : 50,
+      since,
+      excludeIds: excludeIdsArray,
+      limit: limit !== undefined ? parseInt(limit, 10) : 50,
       offset: offset ? parseInt(offset, 10) : 0,
       randomize: randomize === 'true',
     });
