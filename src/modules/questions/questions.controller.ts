@@ -122,6 +122,8 @@ export class QuestionsController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'bookmarked', required: false, type: Boolean })
   @ApiQuery({ name: 'previouslyWrong', required: false, type: Boolean })
+  @ApiQuery({ name: 'unattempted', required: false, type: Boolean, description: 'Questions not asked even once' })
+  @ApiQuery({ name: 'maxAttempts', required: false, type: Number, description: 'Filter questions asked less than N times' })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'offset', required: false, type: Number })
   @ApiQuery({ name: 'randomize', required: false, type: Boolean })
@@ -133,6 +135,8 @@ export class QuestionsController {
     @Query('search') search?: string,
     @Query('bookmarked') bookmarked?: string,
     @Query('previouslyWrong') previouslyWrong?: string,
+    @Query('unattempted') unattempted?: string,
+    @Query('maxAttempts') maxAttempts?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('randomize') randomize?: string,
@@ -147,6 +151,8 @@ export class QuestionsController {
       search,
       bookmarked: bookmarked !== undefined ? bookmarked === 'true' : undefined,
       previouslyWrong: previouslyWrong !== undefined ? previouslyWrong === 'true' : undefined,
+      unattempted: unattempted !== undefined ? unattempted === 'true' : undefined,
+      maxAttempts: maxAttempts !== undefined ? parseInt(maxAttempts, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : 50,
       offset: offset ? parseInt(offset, 10) : 0,
       randomize: randomize === 'true',

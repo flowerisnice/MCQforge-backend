@@ -34,6 +34,8 @@ export interface QueryQuestionsFilter {
   search?: string;
   bookmarked?: boolean;
   previouslyWrong?: boolean;
+  unattempted?: boolean;
+  maxAttempts?: number;
   limit?: number;
   offset?: number;
   randomize?: boolean;
@@ -377,15 +379,35 @@ export class QuestionsService {
     // 3. Tag filter
     if (filter.tag && filter.tag !== 'all') {
       const normTag = filter.tag.trim().toLowerCase();
-      list = list.filter(q => Array.isArray(q.tags) && q.tags.map(t => t.toLowerCase()).includes(normTag));
+      if (normTag === 'undone' || normTag === 'unattempted') {
+        list = list.filter(q => (q.timesAttempted || 0) === 0);
+      } else if (normTag === 'less_than_4' || normTag === 'less than 4 times' || normTag === 'lt4') {
+        list = list.filter(q => (q.timesAttempted || 0) < 4);
+      } else {
+        list = list.filter(q => Array.isArray(q.tags) && q.tags.map(t => t.toLowerCase()).includes(normTag));
+      }
     }
 
-    // 4. Bookmarked filter
+    // 4. Unattempted / Undone filter
+    if (filter.unattempted !== undefined) {
+      if (filter.unattempted) {
+        list = list.filter(q => (q.timesAttempted || 0) === 0);
+      } else {
+        list = list.filter(q => (q.timesAttempted || 0) > 0);
+      }
+    }
+
+    // 5. Max attempts filter (e.g. less than 4 times)
+    if (filter.maxAttempts !== undefined) {
+      list = list.filter(q => (q.timesAttempted || 0) < filter.maxAttempts!);
+    }
+
+    // 6. Bookmarked filter
     if (filter.bookmarked !== undefined) {
       list = list.filter(q => !!q.bookmarked === filter.bookmarked);
     }
 
-    // 5. Previously Wrong filter
+    // 7. Previously Wrong filter
     if (filter.previouslyWrong !== undefined) {
       list = list.filter(q => !!q.previouslyWrong === filter.previouslyWrong);
     }

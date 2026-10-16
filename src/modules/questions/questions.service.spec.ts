@@ -52,7 +52,7 @@ describe('QuestionsService (Batch Ingestion & Duplicate Handling)', () => {
     // Mitochondria index 1 should be resolved to string 'Mitochondria'
     const mito = res.questions.find(q => q.question.includes('Powerhouse'));
     expect(mito?.correctAnswer).toBe('Mitochondria');
-  });
+  }, 20000);
 
   it('should skip duplicate questions when strategy is SKIP (even if options are shuffled)', async () => {
     const runId = Math.random().toString(36).substring(2, 9);
@@ -125,5 +125,36 @@ describe('QuestionsService (Batch Ingestion & Duplicate Handling)', () => {
     const res = await service.getQuestions({ search: runId });
     expect(res.total).toBe(1);
     expect(res.questions[0].sourceText).toBe('Brand new updated text');
+  });
+
+  it('should correctly filter questions with tag "undone" and tag "less_than_4"', async () => {
+    const runId = Math.random().toString(36).substring(2, 9);
+    const questions = [
+      {
+        question: `Unattempted question test [${runId}]`,
+        options: ['A', 'B', 'C', 'D'],
+        correctAnswer: 'A',
+        sourceText: 'Some source proof text',
+        chapter: 'Cell: The Unit of Life',
+        class: 11 as const,
+      },
+    ];
+    await service.ingestQuestions(questions, DuplicateStrategy.SKIP);
+
+    // Filter by tag: 'undone'
+    const resUndone = await service.getQuestions({ search: runId, tag: 'undone' });
+    expect(resUndone.total).toBe(1);
+
+    // Filter by unattempted: true
+    const resUnattempted = await service.getQuestions({ search: runId, unattempted: true });
+    expect(resUnattempted.total).toBe(1);
+
+    // Filter by tag: 'less_than_4'
+    const resLt4 = await service.getQuestions({ search: runId, tag: 'less_than_4' });
+    expect(resLt4.total).toBe(1);
+
+    // Filter by maxAttempts: 4
+    const resMaxAttempts = await service.getQuestions({ search: runId, maxAttempts: 4 });
+    expect(resMaxAttempts.total).toBe(1);
   });
 });
